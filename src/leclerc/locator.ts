@@ -13,12 +13,14 @@
  * the Chrome session cookie and go through the same throttle/retry layer.
  */
 
-import { CookieProvider } from "../auth/cookies.js";
+import { ChromeSession } from "../browser.js";
 import { LeclercConfig } from "../config.js";
 import { delay, Throttler } from "./throttle.js";
 
 const API_BASE =
   "https://api-recherchemagasins.leclercdrive.fr/API_RechercheMagasins/api/v1";
+/** Page origin the locator fetches run from (CORS-allowed for the locator API). */
+const LOCATOR_BASE = "https://www.leclercdrive.fr/";
 const RETRYABLE_STATUSES = new Set([403, 429]);
 
 export interface FoundStore {
@@ -55,7 +57,7 @@ export class StoreLocator {
 
   constructor(
     private readonly config: LeclercConfig,
-    private readonly cookieProvider: CookieProvider,
+    private readonly browser: ChromeSession,
   ) {
     this.throttler = new Throttler({
       minIntervalMs: config.minIntervalMs,
@@ -108,35 +110,24 @@ export class StoreLocator {
   private async getJson<T>(url: string): Promise<T> {
     const res = await this.send(url);
     if (!res.ok) throw new Error(`Locator HTTP ${res.status} (${res.statusText})`);
-    return (await res.json()) as T;
+    return res.json() as T;
   }
 
-  /** Throttled GET with DataDome-aware retry (mirrors LeclercClient.send). */
-  private send(url: string): Promise<Response> {
+  /** Throttled GET, run inside the real Chrome (via ChromeSession) so it passes DataDome. */
+  private send(url: string): Promise<import("../browser.js").PageResponse> {
     return this.throttler.run(async () => {
       let lastStatus = 0;
       for (let attempt = 0; attempt <= this.throttler.maxRetries; attempt++) {
-        if (attempt > 0) {
-          this.cookieProvider.invalidate();
-          await delay(this.throttler.backoff(attempt));
-        }
-        const cookie = await this.cookieProvider.get();
-        const res = await fetch(url, {
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
-              "(KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-            Accept: "application/json",
-            "Accept-Language": "fr-FR,fr;q=0.9",
-            Cookie: cookie,
-          },
+        if (attempt > 0) await delay(this.throttler.backoff(attempt));
+        const res = await this.browser.fetch(LOCATOR_BASE, url, {
+          headers: { Accept: "application/json" },
         });
         if (!RETRYABLE_STATUSES.has(res.status)) return res;
         lastStatus = res.status;
       }
       throw new Error(
-        `Store locator blocked by DataDome (HTTP ${lastStatus}). Open Leclerc Drive ` +
-          `in Chrome to refresh your session, then retry.`,
+        `Localisateur de magasins bloqué (HTTP ${lastStatus}). Vérifie que la fenêtre ` +
+          `Chrome du serveur est ouverte, puis réessaie.`,
       );
     });
   }

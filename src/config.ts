@@ -1,30 +1,31 @@
 /**
  * Runtime configuration, sourced from environment variables.
  *
- * Auth model (v0.1): the cookie is normally read straight from your local
- * Chrome session (see src/auth/cookies.ts) — log into Leclerc Drive in Chrome
- * once and the server borrows that session, DataDome cookie included. For
- * headless deploys (VPS / CI) where there is no browser, set LECLERC_COOKIE to
- * a captured Cookie header and it takes precedence.
+ * Auth model (v0.3): requests run inside a real Chrome driven over CDP
+ * (see src/browser.ts). Chrome opens with a persistent, dedicated profile; the
+ * user logs into Leclerc Drive once in that window and the session persists.
+ * This is what survives DataDome's active mode (which blocks headless /
+ * cookie-replay clients). No cookies are read or stored.
  */
 
-export type CookieSource = "auto" | "chrome" | "env";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 export interface LeclercConfig {
-  /** Store identifier, e.g. "053701" (La Ville-aux-Dames). */
+  /** Default store id, e.g. "053701". Overridden at runtime by set_store. */
   storeId: string;
-  /**
-   * Host serving the drive backend for this store, e.g.
-   * "fd9-courses.leclercdrive.fr". The "fdN" prefix varies by store/region.
-   */
+  /** Default backend host, e.g. "fd9-courses.leclercdrive.fr". */
   host: string;
-  /**
-   * Explicit Cookie header override. When set, it is used as-is and Chrome is
-   * not read. Leave empty to read from the local browser.
-   */
-  cookie: string;
-  /** Chrome profile directory to read cookies from (default "Default"). */
-  chromeProfile: string | undefined;
+
+  // --- Chrome / CDP ---
+  /** Path to the Chrome binary; auto-detected per-OS when empty. */
+  chromePath: string | undefined;
+  /** Persistent Chrome profile dir (keeps the Leclerc login across restarts). */
+  chromeProfileDir: string;
+  /** CDP remote debugging port. */
+  chromePort: number;
+  /** Headless is detectable by DataDome — default false (a window opens). */
+  headless: boolean;
 
   // --- Anti-strike (DataDome) throttling ---
   /** Minimum delay between two requests, in ms. */
@@ -44,6 +45,12 @@ function intEnv(name: string, fallback: number): number {
   return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 
+function boolEnv(name: string, fallback: boolean): boolean {
+  const raw = process.env[name]?.trim().toLowerCase();
+  if (!raw) return fallback;
+  return raw === "1" || raw === "true" || raw === "yes";
+}
+
 const DEFAULT_STORE_ID = "053701";
 const DEFAULT_HOST = "fd9-courses.leclercdrive.fr";
 
@@ -51,18 +58,17 @@ export function loadConfig(): LeclercConfig {
   return {
     storeId: process.env.LECLERC_STORE_ID?.trim() || DEFAULT_STORE_ID,
     host: process.env.LECLERC_HOST?.trim() || DEFAULT_HOST,
-    cookie: process.env.LECLERC_COOKIE?.trim() || "",
-    chromeProfile: process.env.LECLERC_CHROME_PROFILE?.trim() || undefined,
+    chromePath: process.env.LECLERC_CHROME_PATH?.trim() || undefined,
+    chromeProfileDir:
+      process.env.LECLERC_CHROME_PROFILE_DIR?.trim() ||
+      join(homedir(), ".mcp-leclerc-drive", "chrome"),
+    chromePort: intEnv("LECLERC_CHROME_PORT", 9222),
+    headless: boolEnv("LECLERC_HEADLESS", false),
     minIntervalMs: intEnv("LECLERC_MIN_INTERVAL_MS", 1000),
     jitterMs: intEnv("LECLERC_JITTER_MS", 400),
     maxRetries: intEnv("LECLERC_MAX_RETRIES", 3),
     backoffBaseMs: intEnv("LECLERC_BACKOFF_BASE_MS", 1500),
   };
-}
-
-/** Which source the cookie will come from, for logging. */
-export function cookieSourceOf(config: LeclercConfig): CookieSource {
-  return config.cookie ? "env" : "chrome";
 }
 
 /** Store path segment used by the backend (no cosmetic slug). */

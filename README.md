@@ -2,7 +2,7 @@
 
 > The first open-source **MCP server for E.Leclerc Drive** — let Claude search products, manage a cart, and prepare grocery orders natively, instead of clicking through the website.
 
-> 🟢 **v0.1 — working.** All five tools are implemented and **validated end-to-end against the live site** (store 053701): search, add, read, update, remove. Auth reads your existing Chrome session automatically (no copy-paste). See [`docs/api-capture.md`](docs/api-capture.md) for the reverse-engineered API.
+> 🟢 **v0.3 — working & DataDome-proof.** All eight tools are validated end-to-end against the live site. Requests run inside a **real Chrome driven over CDP**, so they pass DataDome's bot protection (which blocks headless clients and cookie-replay). You log into Leclerc Drive once in the window that opens; the session persists. See [`docs/api-capture.md`](docs/api-capture.md) for the reverse-engineered API.
 
 ## Why
 
@@ -23,16 +23,17 @@ E.Leclerc Drive has no public API. Today the only way to automate it is browser 
 
 ## Status
 
-- [x] MCP server scaffold (stdio, `@modelcontextprotocol/sdk`)
-- [x] Tool contracts (`search_product`, `add_to_cart`, `remove_from_cart`, `update_quantity`, `get_cart`)
-- [x] Cookie-based auth model
-- [x] **Reverse-engineer Leclerc Drive endpoints** (validated live — see [`docs/api-capture.md`](docs/api-capture.md))
-- [x] Wire endpoints into [`src/leclerc/client.ts`](src/leclerc/client.ts)
-- [x] Auto-read auth cookie from the local Chrome session ([`src/auth/cookies.ts`](src/auth/cookies.ts))
-- [x] **End-to-end validation of all five tools against the live store** ✅
-- [ ] Test under Claude Desktop / Claude Code (MCP client integration)
-- [ ] Handle DataDome cookie refresh / session expiry gracefully
-- [ ] Publish to npm + submit to MCP registry
+- [x] Reverse-engineer Leclerc Drive endpoints (search / cart / store locator — see [`docs/api-capture.md`](docs/api-capture.md))
+- [x] All 8 tools validated end-to-end against the live store
+- [x] Runtime store selection with persistence (`find_stores` / `set_store`)
+- [x] **v0.3: DataDome-proof via real-Chrome CDP driving** (beats active bot-challenge that killed cookie-replay) ✅
+- [x] Published to npm + MCP registry
+- [ ] Checkout / delivery-slot booking
+
+## Requirements
+
+- **Node.js ≥ 22** (uses the built-in `WebSocket`)
+- **Google Chrome** installed (the server drives it via CDP)
 
 ## Install (development)
 
@@ -43,48 +44,41 @@ npm install
 npm run build
 ```
 
-## Configuration & auth
+## How auth works (real Chrome via CDP)
 
-**Default (recommended): borrow your Chrome session.** Log into Leclerc Drive in
-Chrome once. The server reads the session cookie (incl. the `datadome` cookie)
-directly from your local Chrome profile — no copy-paste, and it refreshes itself
-as your browser session does. On macOS the first read triggers a one-time
-Keychain prompt ("Chrome Safe Storage"); approve it. The server must run on the
-same machine as Chrome.
+Leclerc Drive is protected by [DataDome](https://datadome.co/), which blocks
+non-browser traffic (headless clients, cookie-replay) with HTTP 403 once it
+escalates to active challenge mode. The only thing that reliably passes is a
+**real browser** that executes the challenge. So that's what the server uses:
 
-**Headless deploys (VPS / CI):** set `LECLERC_COOKIE` to a captured `Cookie`
-header and it takes precedence over Chrome (note: a captured DataDome cookie
-expires, so this needs periodic refreshing).
+1. On first request it launches **your installed Google Chrome** with a
+   dedicated, persistent profile (`~/.mcp-leclerc-drive/chrome`) and a debug
+   port — **no automation flags**, so `navigator.webdriver` stays `false`.
+2. A Chrome window opens. **Log into Leclerc Drive once** in it. The persistent
+   profile keeps you logged in across restarts.
+3. Every request runs *inside* that page via CDP, so it carries the browser's
+   cookies, TLS fingerprint, and solved DataDome challenge — and passes.
+
+No cookies are read or stored; there's no Keychain prompt. The server must run
+on the same machine as Chrome, and a window does open (headless is detectable by
+DataDome — don't enable it unless you know the risk).
 
 | Env var | Default | Description |
 | --- | --- | --- |
-| `LECLERC_STORE_ID` | `053701` | Store id (La Ville-aux-Dames). |
-| `LECLERC_HOST` | `fd9-courses.leclercdrive.fr` | Backend host (the `fdN` prefix varies by store). |
-| `LECLERC_CHROME_PROFILE` | `Default` | Chrome profile directory to read cookies from. |
-| `LECLERC_COOKIE` | — | Optional raw `Cookie` override; skips Chrome when set. |
-| `LECLERC_MIN_INTERVAL_MS` | `1000` | Minimum delay between two requests (anti-strike). |
+| `LECLERC_STORE_ID` | `053701` | Default store id (overridden at runtime by `set_store`). |
+| `LECLERC_HOST` | `fd9-courses.leclercdrive.fr` | Default backend host (the `fdN` prefix varies by store). |
+| `LECLERC_CHROME_PATH` | auto | Path to the Chrome binary, if not in the default location. |
+| `LECLERC_CHROME_PROFILE_DIR` | `~/.mcp-leclerc-drive/chrome` | Persistent Chrome profile dir. |
+| `LECLERC_CHROME_PORT` | `9222` | CDP remote-debugging port. |
+| `LECLERC_HEADLESS` | `false` | Run Chrome headless (⚠️ DataDome-detectable — not recommended). |
+| `LECLERC_MIN_INTERVAL_MS` | `1000` | Minimum delay between two requests (hygiene). |
 | `LECLERC_JITTER_MS` | `400` | Extra random jitter added between requests. |
-| `LECLERC_MAX_RETRIES` | `3` | Retries on a 403/429 before giving up. |
+| `LECLERC_MAX_RETRIES` | `3` | Retries on a transient 403/429 before giving up. |
 | `LECLERC_BACKOFF_BASE_MS` | `1500` | Base retry backoff (doubles each attempt). |
 
-### Staying under DataDome (anti-strike)
-
-Leclerc Drive is protected by [DataDome](https://datadome.co/), which blocks
-(HTTP 403) traffic that looks automated — **especially bursts of parallel
-requests**. The server defends against this automatically so you don't get
-struck:
-
-- **Serialized requests** — every call goes through a single queue, one at a
-  time, so even if several tools are invoked "in parallel" they never hit the
-  site at once.
-- **Spacing + jitter** — a ~1 s pause (plus random jitter) between requests.
-- **Retry with backoff** — a 403/429 is retried a few times with exponential
-  backoff, re-reading a fresh cookie from Chrome each attempt (a real browser
-  refreshes its `datadome` cookie on its own).
-
-If you ever do get a persistent 403, just open Leclerc Drive in Chrome to
-refresh your session and retry. Tune the cadence with the `LECLERC_*` env vars
-above.
+The server still serializes and spaces out requests (single queue, ~1 s + jitter,
+retry with backoff) to stay polite — good hygiene even though the browser now
+handles DataDome.
 
 ### Choosing your store (no env needed)
 
@@ -113,22 +107,28 @@ the host.
 
 ### Claude Desktop / Claude Code (`mcp` config)
 
+Install straight from npm — no clone needed:
+
+```bash
+# Claude Code
+claude mcp add leclerc-drive -- npx -y mcp-leclerc-drive
+```
+
+Or in a Claude Desktop config:
+
 ```json
 {
   "mcpServers": {
     "leclerc-drive": {
-      "command": "node",
-      "args": ["/absolute/path/to/mcp-leclerc-drive/dist/index.js"],
-      "env": {
-        "LECLERC_STORE_ID": "053701"
-      }
+      "command": "npx",
+      "args": ["-y", "mcp-leclerc-drive"]
     }
   }
 }
 ```
 
-(No cookie needed in the config — it comes from your Chrome session. Just be
-logged into Leclerc Drive in Chrome.)
+No env needed — pick your store in-conversation with `find_stores` / `set_store`.
+On first use a Chrome window opens: log into Leclerc Drive once and you're set.
 
 ## Development
 
@@ -142,16 +142,15 @@ npm run inspect    # run under the MCP Inspector
 
 ```
 src/
-  index.ts          # MCP server: registers the 5 tools over stdio
-  config.ts         # env-based config (store, host, cookie source)
+  index.ts          # MCP server: registers the 8 tools over stdio
+  config.ts         # env-based config (store, host, Chrome/CDP, throttle)
   types.ts          # Product / CartItem / Cart
   store.ts          # active store selection + persistence (~/.mcp-leclerc-drive)
-  auth/
-    cookies.ts      # cookie provider: auto-read from Chrome, env override
+  browser.ts        # ChromeSession: drives real Chrome via CDP → beats DataDome
   leclerc/
-    client.ts       # Leclerc Drive backend client (search + cart, validated)
+    client.ts       # Leclerc Drive backend client (search + cart)
     locator.ts      # store finder: postal code / city → nearby drives
-    throttle.ts     # anti-strike: serialize + space out + retry (DataDome)
+    throttle.ts     # request serialization + spacing + retry (hygiene)
 docs/
   api-capture.md    # the reverse-engineered Leclerc Drive API
 ```
@@ -169,7 +168,7 @@ wire it in. Good first issues are listed in the status checklist above.
 
 ## Feedback & contact
 
-Feedback, bug reports, and ideas are very welcome — this is an early v0.1.
+Feedback, bug reports, and ideas are very welcome.
 
 - **Issues / PRs:** [open an issue](https://github.com/skunkobi/mcp-leclerc-drive/issues) on the repo.
 - **Email:** alexandreyagoubi@gmail.com

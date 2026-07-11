@@ -11,8 +11,19 @@ incl. DataDome, replayed).
 
 ## 0. Auth / anti-bot
 
-- Session is cookie-based. Replay the full `Cookie` header from a logged-in
-  browser.
+- ✅ **v0.3 (current): requests run inside a real Chrome via CDP** (see
+  `src/browser.ts`), so they carry the browser's cookies + TLS fingerprint +
+  solved DataDome challenge. This is the only approach that survives DataDome's
+  *active* mode. The cookie-replay notes below document the earlier (v0.1–0.2)
+  approach and why it was abandoned.
+- ⚠️⚠️ **DataDome escalates to "active" mode and then cookie-replay is dead.**
+  After enough automated traffic (and it hits real end users too), DataDome stops
+  accepting the cookie alone and requires the JS challenge to be executed. Then a
+  Node `fetch` gets **403 even with a fresh, browser-valid `datadome` cookie and
+  a changed IP**, while the real browser still loads fine. Not recoverable by
+  refreshing Chrome. → v0.3 fixes this by *being* a real browser.
+- [v0.1–0.2, superseded] Session was cookie-based: replay the full `Cookie`
+  header from a logged-in browser.
 - ⚠️ **DataDome** bot protection is active (`api-js.datadome.co/js/`). A
   `datadome` cookie is part of the session and **must** be replayed, or requests
   will be challenged. Confirmed: a cold Node `fetch` (no cookies) gets **HTTP

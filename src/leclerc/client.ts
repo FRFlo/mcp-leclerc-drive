@@ -13,7 +13,7 @@
  *    should be sanity-checked on first real run with a session cookie.
  */
 
-import { CookieProvider } from "../auth/cookies.js";
+import { ChromeSession, PageResponse } from "../browser.js";
 import { LeclercConfig, storePath } from "../config.js";
 import { StoreState } from "../store.js";
 import { Cart, CartItem, Product } from "../types.js";
@@ -78,7 +78,7 @@ export class LeclercClient {
 
   constructor(
     private readonly config: LeclercConfig,
-    private readonly cookieProvider: CookieProvider,
+    private readonly browser: ChromeSession,
     private readonly store: StoreState,
   ) {
     this.throttler = new Throttler({
@@ -89,34 +89,40 @@ export class LeclercClient {
     });
   }
 
+  /** Store page the browser sits on; all search/cart fetches are same-origin to it. */
+  private storeBase(): string {
+    const s = this.store.current();
+    return `${this.origin()}/${storePath(s.storeId, s.noPR)}/recherche.aspx?TexteRecherche=`;
+  }
+
   /**
    * Single choke point for every HTTP call: serialized + spaced out by the
-   * throttler, and retried on a DataDome 403/429 with backoff and a fresh
-   * cookie. Auth headers are rebuilt on each attempt so a refreshed cookie is
-   * picked up. This is what keeps the tool from getting struck.
+   * throttler, and retried with backoff. The request runs inside the real Chrome
+   * (via ChromeSession), so it carries the browser's cookies + fingerprint and
+   * passes DataDome. Do NOT set Cookie/User-Agent — the browser provides them.
    */
   private send(
     method: "GET" | "POST",
     url: string,
     extraHeaders: Record<string, string>,
     body?: string,
-  ): Promise<Response> {
+  ): Promise<PageResponse> {
     return this.throttler.run(async () => {
       let lastStatus = 0;
       for (let attempt = 0; attempt <= this.throttler.maxRetries; attempt++) {
-        if (attempt > 0) {
-          this.cookieProvider.invalidate(); // re-read a fresh datadome cookie
-          await delay(this.throttler.backoff(attempt));
-        }
-        const headers = await this.authHeaders(extraHeaders);
-        const res = await fetch(url, { method, headers, body });
+        if (attempt > 0) await delay(this.throttler.backoff(attempt));
+        const res = await this.browser.fetch(this.storeBase(), url, {
+          method,
+          headers: extraHeaders,
+          body,
+        });
         if (!RETRYABLE_STATUSES.has(res.status)) return res;
         lastStatus = res.status;
       }
       throw new Error(
-        `Blocked by Leclerc Drive (HTTP ${lastStatus}, likely DataDome) after ` +
-          `${this.throttler.maxRetries + 1} attempts. Open Leclerc Drive in Chrome ` +
-          `to refresh your session, then retry.`,
+        `Bloqué par Leclerc Drive (HTTP ${lastStatus}) après ` +
+          `${this.throttler.maxRetries + 1} tentatives. Vérifie que tu es connecté à ` +
+          `Leclerc Drive dans la fenêtre Chrome ouverte par le serveur, puis réessaie.`,
       );
     });
   }
@@ -137,20 +143,6 @@ export class LeclercClient {
       s.storeId,
       s.noPR,
     )}/recherche.aspx?TexteRecherche=${encodeURIComponent(query)}`;
-  }
-
-  private async authHeaders(
-    extra: Record<string, string> = {},
-  ): Promise<Record<string, string>> {
-    const cookie = await this.cookieProvider.get();
-    return {
-      "User-Agent":
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
-        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-      "Accept-Language": "fr-FR,fr;q=0.9",
-      Cookie: cookie,
-      ...extra,
-    };
   }
 
   // ---- Search ------------------------------------------------------------

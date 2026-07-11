@@ -17,8 +17,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
-import { createCookieProvider } from "./auth/cookies.js";
-import { cookieSourceOf, loadConfig } from "./config.js";
+import { ChromeSession } from "./browser.js";
+import { loadConfig } from "./config.js";
 import { LeclercClient } from "./leclerc/client.js";
 import { FoundStore, StoreLocator } from "./leclerc/locator.js";
 import { StoreState } from "./store.js";
@@ -31,10 +31,15 @@ const pkg = JSON.parse(
 ) as { version: string };
 
 const config = loadConfig();
-const cookieProvider = createCookieProvider(config);
+const browser = new ChromeSession({
+  chromePath: config.chromePath,
+  profileDir: config.chromeProfileDir,
+  port: config.chromePort,
+  headless: config.headless,
+});
 const store = new StoreState(config);
-const client = new LeclercClient(config, cookieProvider, store);
-const locator = new StoreLocator(config, cookieProvider);
+const client = new LeclercClient(config, browser, store);
+const locator = new StoreLocator(config, browser);
 
 // Cache of the last find_stores results, so set_store can resolve the host
 // (and noPR) from just a store id the user picked.
@@ -239,7 +244,7 @@ async function main() {
   // stderr only — stdout is the MCP channel.
   console.error(
     `mcp-leclerc-drive ready (store ${s.storeId} @ ${s.host}, ` +
-      `cookie source: ${cookieSourceOf(config)})`,
+      `auth: real Chrome via CDP${config.headless ? " [headless]" : ""})`,
   );
 }
 
