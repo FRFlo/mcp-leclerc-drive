@@ -14,7 +14,7 @@
 import { readFileSync } from "node:fs";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
 
 import { ChromeSession } from "./browser.js";
@@ -45,10 +45,11 @@ const locator = new StoreLocator(config, browser);
 // (and noPR) from just a store id the user picked.
 const lastFound = new Map<string, FoundStore>();
 
-const server = new McpServer({
-  name: "mcp-leclerc-drive",
-  version: pkg.version,
-});
+function createMcpServer() {
+  const server = new McpServer({
+    name: "mcp-leclerc-drive",
+    version: pkg.version,
+  });
 
 function formatProduct(p: Product): string {
   const bits = [
@@ -86,7 +87,7 @@ function asError(err: unknown) {
   return { content: [{ type: "text" as const, text: `Erreur : ${message}` }], isError: true };
 }
 
-server.tool(
+  server.tool(
   "search_product",
   "Recherche des produits dans le catalogue Leclerc Drive du magasin configuré. " +
     "Retourne label, prix, prix au kilo/litre, Nutri-Score, disponibilité et l'id " +
@@ -103,7 +104,7 @@ server.tool(
   },
 );
 
-server.tool(
+  server.tool(
   "add_to_cart",
   "Ajoute un produit au panier. Utilise l'id retourné par search_product.",
   {
@@ -120,7 +121,7 @@ server.tool(
   },
 );
 
-server.tool(
+  server.tool(
   "remove_from_cart",
   "Retire complètement un produit du panier.",
   { product_id: z.string().describe("Identifiant produit à retirer") },
@@ -134,7 +135,7 @@ server.tool(
   },
 );
 
-server.tool(
+  server.tool(
   "update_quantity",
   "Modifie la quantité d'un produit déjà présent dans le panier.",
   {
@@ -151,7 +152,7 @@ server.tool(
   },
 );
 
-server.tool(
+  server.tool(
   "get_cart",
   "Affiche le contenu complet du panier avec le total.",
   {},
@@ -165,7 +166,7 @@ server.tool(
   },
 );
 
-server.tool(
+  server.tool(
   "find_stores",
   "Recherche les drives E.Leclerc proches d'un code postal ou d'une ville, triés " +
     "par distance. Retourne pour chacun : nom, identifiant (à passer à set_store), " +
@@ -191,7 +192,7 @@ server.tool(
   },
 );
 
-server.tool(
+  server.tool(
   "set_store",
   "Sélectionne le magasin actif (et le mémorise pour les prochaines sessions). " +
     "Utilise l'id renvoyé par find_stores.",
@@ -227,7 +228,7 @@ server.tool(
   },
 );
 
-server.tool(
+  server.tool(
   "get_store",
   "Affiche le magasin actuellement sélectionné (id, host).",
   {},
@@ -237,18 +238,36 @@ server.tool(
   },
 );
 
-async function main() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  const s = store.current();
-  // stderr only — stdout is the MCP channel.
-  console.error(
-    `mcp-leclerc-drive ready (store ${s.storeId} @ ${s.host}, ` +
-      `auth: real Chrome via CDP${config.headless ? " [headless]" : ""})`,
-  );
+  return server;
 }
 
-main().catch((err) => {
+const port = Number(process.env.MCP_PORT || 3000);
+const hostname = process.env.MCP_HOST || "127.0.0.1";
+
+const httpServer = Bun.serve({
+  port,
+  hostname,
+  async fetch(request) {
+    const url = new URL(request.url);
+    if (url.pathname === "/health") return Response.json({ ok: true });
+
+    const server = createMcpServer();
+    const transport = new WebStandardStreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+    });
+    await server.connect(transport);
+    return transport.handleRequest(request);
+  },
+});
+
+console.error(`mcp-leclerc-drive ready (Streamable HTTP on ${httpServer.url}mcp)`);
+
+process.on("SIGINT", () => {
+  httpServer.stop();
+  process.exit(0);
+});
+
+process.on("uncaughtException", (err) => {
   console.error("Fatal:", err);
   process.exit(1);
 });

@@ -4,6 +4,8 @@
 
 > 🟢 **v0.3 — working & DataDome-proof.** All eight tools are validated end-to-end against the live site. Requests run inside a **real Chrome driven over CDP**, so they pass DataDome's bot protection (which blocks headless clients and cookie-replay). You log into Leclerc Drive once in the window that opens; the session persists. See [`docs/api-capture.md`](docs/api-capture.md) for the reverse-engineered API.
 
+This fork adds updated dependencies, Bun support, and a Streamable HTTP endpoint.
+
 ## Why
 
 E.Leclerc Drive has no public API. Today the only way to automate it is browser automation — slow (~3–5 s per item) and fragile (blind clicks). This project exposes the underlying operations as proper MCP tools so any MCP client (Claude Desktop, Claude Code) can drive it directly.
@@ -33,15 +35,16 @@ E.Leclerc Drive has no public API. Today the only way to automate it is browser 
 ## Requirements
 
 - **Node.js ≥ 22** (uses the built-in `WebSocket`)
+- [Bun](https://bun.sh/) for installation and scripts
 - **Google Chrome** installed (the server drives it via CDP)
 
 ## Install (development)
 
 ```bash
-git clone https://github.com/skunkobi/mcp-leclerc-drive.git
+git clone https://github.com/FRFlo/mcp-leclerc-drive.git
 cd mcp-leclerc-drive
-npm install
-npm run build
+bun install
+bun run build
 ```
 
 ## How auth works (real Chrome via CDP)
@@ -105,13 +108,24 @@ looks like `https://fd9-courses.leclercdrive.fr/magasin-053701-053701-Your-Town/
 — the 6-digit number is the store id, the `fdN-courses.leclercdrive.fr` part is
 the host.
 
+### Streamable HTTP
+
+The server listens on `http://127.0.0.1:3000/mcp` by default. Configure `MCP_HOST`
+and `MCP_PORT` to change the bind address. A health endpoint is available at
+`/health`. The endpoint uses the SDK's stateless Streamable HTTP transport.
+
+```bash
+bun run build
+bun run start
+```
+
 ### Claude Desktop / Claude Code (`mcp` config)
 
 Install straight from npm — no clone needed:
 
 ```bash
 # Claude Code
-claude mcp add leclerc-drive -- npx -y mcp-leclerc-drive
+claude mcp add --transport http leclerc-drive http://127.0.0.1:3000/mcp
 ```
 
 Or in a Claude Desktop config:
@@ -120,8 +134,8 @@ Or in a Claude Desktop config:
 {
   "mcpServers": {
     "leclerc-drive": {
-      "command": "npx",
-      "args": ["-y", "mcp-leclerc-drive"]
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:3000/mcp"
     }
   }
 }
@@ -133,16 +147,16 @@ On first use a Chrome window opens: log into Leclerc Drive once and you're set.
 ## Development
 
 ```bash
-npm run dev        # tsc --watch
-npm run typecheck  # type-check without emitting
-npm run inspect    # run under the MCP Inspector
+bun run dev        # tsc --watch
+bun run typecheck  # type-check without emitting
+bun run inspect    # run under the MCP Inspector
 ```
 
 ## Architecture
 
 ```
 src/
-  index.ts          # MCP server: registers the 8 tools over stdio
+  index.ts          # MCP server: registers the 8 tools over Streamable HTTP
   config.ts         # env-based config (store, host, Chrome/CDP, throttle)
   types.ts          # Product / CartItem / Cart
   store.ts          # active store selection + persistence (~/.mcp-leclerc-drive)
