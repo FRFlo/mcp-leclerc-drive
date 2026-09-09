@@ -36,6 +36,7 @@ const browser = new ChromeSession({
   profileDir: config.chromeProfileDir,
   port: config.chromePort,
   headless: config.headless,
+  cookie: config.cookie,
 });
 const store = new StoreState(config);
 const client = new LeclercClient(config, browser, store);

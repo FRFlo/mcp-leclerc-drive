@@ -36,6 +36,8 @@ export interface LeclercConfig {
   maxRetries: number;
   /** Base backoff for retries, in ms (doubles each attempt). */
   backoffBaseMs: number;
+  /** Optional raw Cookie header exported from an authenticated browser. */
+  cookie: string | undefined;
 }
 
 function intEnv(name: string, fallback: number): number {
@@ -68,6 +70,7 @@ export function loadConfig(): LeclercConfig {
     jitterMs: intEnv("LECLERC_JITTER_MS", 400),
     maxRetries: intEnv("LECLERC_MAX_RETRIES", 3),
     backoffBaseMs: intEnv("LECLERC_BACKOFF_BASE_MS", 1500),
+    cookie: process.env.LECLERC_COOKIE?.trim() || undefined,
   };
 }
 

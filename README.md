@@ -72,6 +72,7 @@ DataDome — don't enable it unless you know the risk).
 | `LECLERC_HOST` | `fd9-courses.leclercdrive.fr` | Default backend host (the `fdN` prefix varies by store). |
 | `LECLERC_CHROME_PATH` | auto | Path to the Chrome binary, if not in the default location. |
 | `LECLERC_CHROME_PROFILE_DIR` | `~/.mcp-leclerc-drive/chrome` | Persistent Chrome profile dir. |
+| `LECLERC_COOKIE` | empty | Optional raw `Cookie` header used to seed the Chrome session. May expire or be rejected by DataDome. |
 | `LECLERC_CHROME_PORT` | `9222` | CDP remote-debugging port. |
 | `LECLERC_HEADLESS` | `false` | Run Chrome headless (⚠️ DataDome-detectable — not recommended). |
 | `LECLERC_MIN_INTERVAL_MS` | `1000` | Minimum delay between two requests (hygiene). |

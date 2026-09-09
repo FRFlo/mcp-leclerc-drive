@@ -37,6 +37,8 @@ export interface ChromeOptions {
   port: number;
   /** Headless is detectable by DataDome — default false (a window opens). */
   headless: boolean;
+  /** Optional raw Cookie header to seed the browser profile. */
+  cookie?: string;
 }
 
 const DEFAULT_CHROME: Record<string, string> = {
@@ -66,6 +68,7 @@ export class ChromeSession {
   private eventWaiters: Array<{ method: string; res: () => void }> = [];
   private currentUrl = "";
   private launching?: Promise<void>;
+  private cookieApplied = false;
 
   constructor(private readonly opts: ChromeOptions) {}
 
@@ -141,6 +144,7 @@ export class ChromeSession {
       }
     };
     this.ws = ws;
+    await this.cdp("Network.enable");
     await this.cdp("Page.enable");
     this.currentUrl = page.url || "";
   }
@@ -192,6 +196,27 @@ export class ChromeSession {
     opts: { method?: string; headers?: Record<string, string>; body?: string } = {},
   ): Promise<PageResponse> {
     await this.ensureLaunched();
+    if (this.opts.cookie && !this.cookieApplied) {
+      const domain = new URL(baseUrl).hostname;
+      const cookies = this.opts.cookie
+        .split(";")
+        .map((part) => part.trim())
+        .filter((part) => part.includes("="))
+        .map((part) => {
+          const separator = part.indexOf("=");
+          return {
+            name: part.slice(0, separator).trim(),
+            value: part.slice(separator + 1).trim(),
+            domain,
+            path: "/",
+            secure: true,
+          };
+        });
+      if (cookies.length > 0) {
+        await this.cdp("Network.setCookies", { cookies });
+        this.cookieApplied = true;
+      }
+    }
     await this.ensurePage(baseUrl);
 
     const args = {
