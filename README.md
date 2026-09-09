@@ -119,6 +119,16 @@ bun run build
 bun run start
 ```
 
+### Docker
+
+```bash
+docker build -t mcp-leclerc-drive .
+docker run --rm -p 3000:3000 -v leclerc-drive-data:/data mcp-leclerc-drive
+```
+
+The container includes Chromium and keeps its profile under `/data/chrome`.
+
+
 ### Claude Desktop / Claude Code (`mcp` config)
 
 Install straight from npm — no clone needed:
