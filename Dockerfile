@@ -9,9 +9,11 @@ COPY tsconfig.json ./
 COPY src ./src
 RUN bun run build
 
-FROM oven/bun:1.3-alpine AS runner
+FROM oven/bun:1.3 AS runner
 
-RUN apk add --no-cache chromium && \
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends chromium xvfb fluxbox x11vnc novnc websockify && \
+    rm -rf /var/lib/apt/lists/* && \
     mkdir -p /data/chrome && \
     chown -R bun:bun /data
 
@@ -24,12 +26,16 @@ COPY --from=builder /app/dist ./dist
 ENV NODE_ENV=production \
     MCP_HOST=0.0.0.0 \
     MCP_PORT=3000 \
-    LECLERC_CHROME_PATH=chromium-browser \
+    DISPLAY=:99 \
+    LECLERC_CHROME_PATH=chromium \
     LECLERC_CHROME_PROFILE_DIR=/data/chrome \
-    LECLERC_HEADLESS=true
+    LECLERC_HEADLESS=false
 
 USER bun
 
-EXPOSE 3000
+EXPOSE 3000 6080
 
-CMD ["bun", "dist/index.js"]
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
