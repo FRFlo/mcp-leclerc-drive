@@ -87,12 +87,14 @@ function asError(err: unknown) {
   return { content: [{ type: "text" as const, text: `Erreur : ${message}` }], isError: true };
 }
 
-  server.tool(
+  server.registerTool(
   "search_product",
-  "Recherche des produits dans le catalogue Leclerc Drive du magasin configuré. " +
-    "Retourne label, prix, prix au kilo/litre, Nutri-Score, disponibilité et l'id " +
-    "à utiliser pour add_to_cart.",
-  { query: z.string().describe("Termes de recherche, ex. 'lait demi-écrémé bio'") },
+  {
+    description: "Recherche des produits dans le catalogue Leclerc Drive du magasin configuré. " +
+      "Retourne label, prix, prix au kilo/litre, Nutri-Score, disponibilité et l'id " +
+      "à utiliser pour add_to_cart.",
+    inputSchema: { query: z.string().describe("Termes de recherche, ex. 'lait demi-écrémé bio'") },
+  },
   async ({ query }) => {
     try {
       const products = await client.searchProducts(query);
@@ -104,12 +106,14 @@ function asError(err: unknown) {
   },
 );
 
-  server.tool(
+  server.registerTool(
   "add_to_cart",
-  "Ajoute un produit au panier. Utilise l'id retourné par search_product.",
   {
-    product_id: z.string().describe("Identifiant produit (champ id de search_product)"),
-    quantity: z.number().int().positive().default(1).describe("Quantité à ajouter"),
+    description: "Ajoute un produit au panier. Utilise l'id retourné par search_product.",
+    inputSchema: {
+      product_id: z.string().describe("Identifiant produit (champ id de search_product)"),
+      quantity: z.number().int().positive().default(1).describe("Quantité à ajouter"),
+    },
   },
   async ({ product_id, quantity }) => {
     try {
@@ -121,10 +125,12 @@ function asError(err: unknown) {
   },
 );
 
-  server.tool(
+  server.registerTool(
   "remove_from_cart",
-  "Retire complètement un produit du panier.",
-  { product_id: z.string().describe("Identifiant produit à retirer") },
+  {
+    description: "Retire complètement un produit du panier.",
+    inputSchema: { product_id: z.string().describe("Identifiant produit à retirer") },
+  },
   async ({ product_id }) => {
     try {
       const cart = await client.removeFromCart(product_id);
@@ -135,12 +141,14 @@ function asError(err: unknown) {
   },
 );
 
-  server.tool(
+  server.registerTool(
   "update_quantity",
-  "Modifie la quantité d'un produit déjà présent dans le panier.",
   {
-    product_id: z.string().describe("Identifiant produit"),
-    quantity: z.number().int().nonnegative().describe("Nouvelle quantité (0 pour retirer)"),
+    description: "Modifie la quantité d'un produit déjà présent dans le panier.",
+    inputSchema: {
+      product_id: z.string().describe("Identifiant produit"),
+      quantity: z.number().int().nonnegative().describe("Nouvelle quantité (0 pour retirer)"),
+    },
   },
   async ({ product_id, quantity }) => {
     try {
@@ -152,10 +160,9 @@ function asError(err: unknown) {
   },
 );
 
-  server.tool(
+  server.registerTool(
   "get_cart",
-  "Affiche le contenu complet du panier avec le total.",
-  {},
+  { description: "Affiche le contenu complet du panier avec le total.", inputSchema: {} },
   async () => {
     try {
       const cart = await client.getCart();
@@ -166,12 +173,14 @@ function asError(err: unknown) {
   },
 );
 
-  server.tool(
+  server.registerTool(
   "find_stores",
-  "Recherche les drives E.Leclerc proches d'un code postal ou d'une ville, triés " +
-    "par distance. Retourne pour chacun : nom, identifiant (à passer à set_store), " +
-    "type de service (drive/relais/livraison), distance et magasin.",
-  { query: z.string().describe("Code postal ou ville, ex. '44000' ou 'Nantes'") },
+  {
+    description: "Recherche les drives E.Leclerc proches d'un code postal ou d'une ville, triés " +
+      "par distance. Retourne pour chacun : nom, identifiant (à passer à set_store), " +
+      "type de service (drive/relais/livraison), distance et magasin.",
+    inputSchema: { query: z.string().describe("Code postal ou ville, ex. '44000' ou 'Nantes'") },
+  },
   async ({ query }) => {
     try {
       const stores = await locator.findStores(query);
@@ -192,16 +201,18 @@ function asError(err: unknown) {
   },
 );
 
-  server.tool(
+  server.registerTool(
   "set_store",
-  "Sélectionne le magasin actif (et le mémorise pour les prochaines sessions). " +
-    "Utilise l'id renvoyé par find_stores.",
   {
-    store_id: z.string().describe("Identifiant magasin (champ id de find_stores)"),
-    host: z
-      .string()
-      .optional()
-      .describe("Host backend (optionnel) si le magasin n'a pas été trouvé via find_stores"),
+    description: "Sélectionne le magasin actif (et le mémorise pour les prochaines sessions). " +
+      "Utilise l'id renvoyé par find_stores.",
+    inputSchema: {
+      store_id: z.string().describe("Identifiant magasin (champ id de find_stores)"),
+      host: z
+        .string()
+        .optional()
+        .describe("Host backend (optionnel) si le magasin n'a pas été trouvé via find_stores"),
+    },
   },
   async ({ store_id, host }) => {
     try {
@@ -228,10 +239,9 @@ function asError(err: unknown) {
   },
 );
 
-  server.tool(
+  server.registerTool(
   "get_store",
-  "Affiche le magasin actuellement sélectionné (id, host).",
-  {},
+  { description: "Affiche le magasin actuellement sélectionné (id, host).", inputSchema: {} },
   async () => {
     const s = store.current();
     return asText(`Magasin actif : ${s.name ?? s.storeId} (id=${s.storeId} @ ${s.host}).`);
@@ -242,7 +252,7 @@ function asError(err: unknown) {
 }
 
 const port = Number(process.env.MCP_PORT || 3000);
-const hostname = process.env.MCP_HOST || "127.0.0.1";
+const hostname = process.env.MCP_HOST || "0.0.0.0";
 
 const httpServer = Bun.serve({
   port,
